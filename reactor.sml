@@ -72,6 +72,7 @@ end
 
 structure PiCalculus : PI_CALCULUS = struct
 open MLton.Pacml
+open Thunk
 datatype t = Nil
 	   | Variable of string
 	   | Channel of t chan
@@ -118,27 +119,17 @@ val rec evaluate =
 		  in evaluate c'
 		  end
   | Channel c => Channel c
-  | Parallel (p, q) => let val pChan = channel
-			   val qChan = channel
-			   val _ = spawn (fn () =>
-					     aSend (pChan, evaluate p))
-			   val _ = spawn (fn () =>
-					     aSend (qChan, evaluate q))
-			   val p' = recv pChan
-			   val q' = recv qChan
-		       in case p' & q' of
-			      (Nil, value) => value
-			    | (value, Nil) => value
-			    | both => both
-		       end
+  | Parallel (p, q) => (case bifurcate (delay evaluate p, delay evaluate q) of
+			    (Nil, value) => value
+			  | (value, Nil) => value
+			  | both => Parallel both)
   | Output (v, c, p) => (case evaluate c of
 			     Channel chan =>
 			     let val v' = evaluate v
 				 val () = aSend (chan, v')
 			     in evaluate p
 			     end
-			   | other => raise Evaluate
-			)
+			   | other => raise Evaluate)
   | Input (v, c, p) => (case evaluate c of
 			    Channel chan =>
 			    let val input = recv chan
@@ -146,8 +137,7 @@ val rec evaluate =
 				val p' = replace p v input
 			    in evaluate p'
 			    end
-			  | other => raise Evaluate
-		       )
+			  | other => raise Evaluate)
   | Replicate p => raise Evaluate (* TODO: replace with recursion? *)
 
 val rec toString =
